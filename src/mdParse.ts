@@ -86,10 +86,11 @@ export function replaceDrawingBlock(mdContent: string, newBody: string, asCompre
       block.kind === "compressed"
         ? block.prefix
         : "\n## Drawing\n```compressed-json\n";
-    return mdContent.replace(block.fullMatch, `${prefix}${compressed}\n${block.suffix}`);
+    // Function replacer so `$` sequences in the body are not treated as patterns.
+    return mdContent.replace(block.fullMatch, () => `${prefix}${compressed}\n${block.suffix}`);
   }
   const prefix = block.kind === "json" ? block.prefix : "\n## Drawing\n```json\n";
-  return mdContent.replace(block.fullMatch, `${prefix}${newBody}\n${block.suffix}`);
+  return mdContent.replace(block.fullMatch, () => `${prefix}${newBody}\n${block.suffix}`);
 }
 
 const TEXT_ELEMENTS_HEADER = /^(##? Text Elements)\s*$/m;
@@ -135,21 +136,22 @@ export function updateTextElementLine(
   const section = tail.slice(0, sectionEnd);
   const after = tail.slice(sectionEnd);
 
-  const lineRe = new RegExp(
-    `^([\\s\\S]*?)(\\s\\^${escapeRegExp(elementId)})(\\s*\\n)`,
-    "m",
-  );
-  const lm = section.match(lineRe);
-  if (!lm) throw new Error(`Text element ^${elementId} not found in ## Text Elements`);
-  const updatedSection = section.replace(
-    lineRe,
-    `${newLabel}$2$3`,
-  );
-  return before + updatedSection + after;
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // A label spans from the end of the previous `^id` marker (or the section
+  // start) up to its own marker, so walk all markers to find its boundaries.
+  const markerRe = /\s\^([a-zA-Z0-9_-]+)[ \t]*(?=\n|$)/g;
+  let pos = 0;
+  let m: RegExpExecArray | null;
+  while ((m = markerRe.exec(section)) !== null) {
+    if (m[1] === elementId) {
+      const labelStart = pos + (section.slice(pos, m.index).match(/^\s*/)?.[0].length ?? 0);
+      // Slice instead of String.replace so `$` in the label is taken literally.
+      const updatedSection =
+        section.slice(0, labelStart) + newLabel + section.slice(m.index);
+      return before + updatedSection + after;
+    }
+    pos = m.index + m[0].length;
+  }
+  throw new Error(`Text element ^${elementId} not found in ## Text Elements`);
 }
 
 /** Insert `label ^id` before the next `##` section after ## Text Elements. */
